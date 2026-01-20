@@ -59,16 +59,31 @@ const CONFIG = getConfig();
 
 /**
  * Handles sync metadata embedded in event descriptions.
- * Format: <!-- [SYNCED_FROM_SOURCE] SOURCE_ID:<event_id> -->
+ * Format: <!-- [SYNCED_FROM_SOURCE] SOURCE_ID:<event_id>_<start_time_iso> -->
+ *
+ * For recurring events, the base event ID is the same for all instances,
+ * so we append the start time to create a unique identifier per instance.
  */
 class SyncMetadata {
   /**
+   * Create a unique instance ID for an event
+   * Combines base event ID with start time to handle recurring events
+   * @param {CalendarEvent} event - The calendar event
+   * @returns {string} Unique identifier for this specific instance
+   */
+  static createInstanceId(event) {
+    const baseId = event.getId();
+    const startTime = event.getStartTime().toISOString();
+    return `${baseId}_${startTime}`;
+  }
+
+  /**
    * Create a metadata tag for embedding in event description
-   * @param {string} sourceId - The source event ID
+   * @param {string} instanceId - The unique instance ID (from createInstanceId)
    * @returns {string} The metadata string to append to description
    */
-  static createTag(sourceId) {
-    return `\n\n<!-- ${CONFIG.SYNC_TAG} SOURCE_ID:${sourceId} -->`;
+  static createTag(instanceId) {
+    return `\n\n<!-- ${CONFIG.SYNC_TAG} SOURCE_ID:${instanceId} -->`;
   }
 
   /**
@@ -161,11 +176,12 @@ function syncCalendars() {
   
   // Sync each source event
   let created = 0, updated = 0, unchanged = 0;
-  
+
   for (const sourceEvent of sourceEvents) {
-    const sourceId = sourceEvent.getId();
-    processedSourceIds.add(sourceId);
-    
+    // Use instance ID (base ID + start time) to handle recurring events
+    const instanceId = SyncMetadata.createInstanceId(sourceEvent);
+    processedSourceIds.add(instanceId);
+
     const result = syncEvent(sourceEvent, destCalendar, syncedEventsMap);
     
     if (result === 'created') created++;
@@ -219,22 +235,34 @@ function buildSyncedEventsMap(destEvents) {
  * Returns: 'created', 'updated', or 'unchanged'
  */
 function syncEvent(sourceEvent, destCalendar, syncedEventsMap) {
-  const sourceId = sourceEvent.getId();
-  const existingDestEvent = syncedEventsMap.get(sourceId);
-  
+  // Use instance ID to handle recurring events (each instance has same base ID)
+  const instanceId = SyncMetadata.createInstanceId(sourceEvent);
+  const existingDestEvent = syncedEventsMap.get(instanceId);
+
   // Prepare event data
   const eventData = {
     title: sourceEvent.getTitle(),
     startTime: sourceEvent.getStartTime(),
     endTime: sourceEvent.getEndTime(),
-    description: buildSyncedDescription(sourceEvent, sourceId),
+    description: buildSyncedDescription(sourceEvent, instanceId),
     location: CONFIG.SYNC_DETAILS ? sourceEvent.getLocation() : '',
     isAllDay: sourceEvent.isAllDayEvent(),
   };
-  
+
   if (existingDestEvent) {
+    const existingData = {
+      title: existingDestEvent.getTitle(),
+      startTime: existingDestEvent.getStartTime(),
+      endTime: existingDestEvent.getEndTime(),
+      description: existingDestEvent.getDescription(),
+      location: existingDestEvent.getLocation() ?? '',
+      isAllDay: existingDestEvent.isAllDayEvent(),
+    };
+  
     // Check if update is needed
-    if (needsUpdate(existingDestEvent, eventData)) {
+    const toUpdate = needsUpdate(existingData, eventData);
+  
+    if (toUpdate) {
       updateEvent(existingDestEvent, eventData);
       return 'updated';
     }
@@ -249,27 +277,27 @@ function syncEvent(sourceEvent, destCalendar, syncedEventsMap) {
 /**
  * Build the description with sync metadata
  */
-function buildSyncedDescription(sourceEvent, sourceId) {
+function buildSyncedDescription(sourceEvent, instanceId) {
   let description = '';
-  
+
   if (CONFIG.SYNC_DETAILS) {
     description = sourceEvent.getDescription() || '';
   }
-  
-  return description + SyncMetadata.createTag(sourceId);
+
+  return description + SyncMetadata.createTag(instanceId);
 }
 
 /**
  * Check if an existing event needs to be updated
  */
-function needsUpdate(existingEvent, newData) {
-  if (existingEvent.getTitle() !== newData.title) return true;
-  if (existingEvent.getStartTime().getTime() !== newData.startTime.getTime()) return true;
-  if (existingEvent.getEndTime().getTime() !== newData.endTime.getTime()) return true;
-  if (existingEvent.getLocation() !== newData.location) return true;
+function needsUpdate(existingData, newData) {
+  if (existingData.title !== newData.title) return true;
+  if (existingData.startTime.getTime() !== newData.startTime.getTime()) return true;
+  if (existingData.endTime.getTime() !== newData.endTime.getTime()) return true;
+  if (existingData.location !== newData.location) return true;
   
   // Check description (excluding metadata)
-  const existingDesc = SyncMetadata.stripTag(existingEvent.getDescription());
+  const existingDesc = SyncMetadata.stripTag(existingData.description);
   const newDesc = SyncMetadata.stripTag(newData.description);
   if (existingDesc !== newDesc) return true;
   
