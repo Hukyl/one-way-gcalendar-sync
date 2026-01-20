@@ -1,8 +1,8 @@
-# One-Way Google Calendar Sync - Setup Guide
+# One-Way Google Calendar Sync
 
 ## Overview
 
-This Google Apps Script syncs events **one-way** from a source calendar to your primary calendar. Events created in the destination calendar will NOT sync back to the source.
+This Google Apps Script syncs events **one-way** from a source calendar to your primary calendar. Events created in the destination calendar will NOT sync back to the source. The script also properly handles recurring events.
 
 ## Quick Setup (5 minutes)
 
@@ -19,6 +19,14 @@ This Google Apps Script syncs events **one-way** from a source calendar to your 
 2. **Get the Source Calendar ID**:
    - In the same settings page, scroll to **"Integrate calendar"**
    - Copy the **Calendar ID** (looks like `example@gmail.com` or `abc123@group.calendar.google.com`)
+
+3. **In your DESTINATION account** (where you want events copied TO):
+   - In your Google Calendar, press + button near "Other calendars"
+   - Choose "Subscribe to calendar"
+   - Paste the Source Calendar ID
+   - Click "Subscribe"
+
+   Note: this is required for the script to be able to access the source calendar.
 
 ### Step 2: Set Up the Script
 
@@ -139,6 +147,5 @@ Events created directly in the destination calendar are ignored (no sync tag), s
 ## Limitations
 
 - Syncs basic event properties (title, time, description, location)
-- Does not sync: reminders, attachments, conferencing links, recurring event rules
-- Recurring events are synced as individual instances
+- Does not sync: reminders, attachments, conferencing links
 - Maximum ~60-day future window recommended for performance
