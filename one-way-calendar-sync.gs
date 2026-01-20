@@ -54,6 +54,68 @@ function getConfig() {
 const CONFIG = getConfig();
 
 // ============================================================================
+// SYNC METADATA HANDLER
+// ============================================================================
+
+/**
+ * Handles sync metadata embedded in event descriptions.
+ * Format: <!-- [SYNCED_FROM_SOURCE] SOURCE_ID:<event_id> -->
+ */
+class SyncMetadata {
+  /**
+   * Create a metadata tag for embedding in event description
+   * @param {string} sourceId - The source event ID
+   * @returns {string} The metadata string to append to description
+   */
+  static createTag(sourceId) {
+    return `\n\n<!-- ${CONFIG.SYNC_TAG} SOURCE_ID:${sourceId} -->`;
+  }
+
+  /**
+   * Check if a description contains sync metadata
+   * @param {string} description - The event description
+   * @returns {boolean} True if sync metadata is present
+   */
+  static hasTag(description) {
+    if (!description) return false;
+    return this._getPattern().test(description);
+  }
+
+  /**
+   * Extract the source event ID from a description
+   * @param {string} description - The event description
+   * @returns {string|null} The source ID or null if not found
+   */
+  static extractSourceId(description) {
+    if (!description) return null;
+    const match = description.match(this._getPattern());
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Strip sync metadata from description (for comparison purposes)
+   * @param {string} description - The event description
+   * @returns {string} Description without sync metadata
+   */
+  static stripTag(description) {
+    if (!description) return '';
+    return description.replace(this._getPattern(), '').trim();
+  }
+
+  /**
+   * Get the regex pattern for matching sync metadata
+   * Matches: <!-- [SYNCED_FROM_SOURCE] SOURCE_ID:<id> -->
+   * @returns {RegExp} The compiled regex pattern
+   */
+  static _getPattern() {
+    // Escape special regex chars in SYNC_TAG (brackets)
+    const escapedTag = CONFIG.SYNC_TAG.replace(/[[\]]/g, '\\$&');
+    // Match the full HTML comment structure, capture the source ID (non-whitespace chars)
+    return new RegExp(`<!--\\s*${escapedTag}\\s+SOURCE_ID:(\\S+)\\s*-->`);
+  }
+}
+
+// ============================================================================
 // MAIN SYNC FUNCTION
 // ============================================================================
 
@@ -142,14 +204,10 @@ function buildSyncedEventsMap(destEvents) {
   
   for (const event of destEvents) {
     const description = event.getDescription() || '';
+    const sourceId = SyncMetadata.extractSourceId(description);
     
-    // Check if this is a synced event
-    if (description.includes(CONFIG.SYNC_TAG)) {
-      // Extract source ID from description
-      const match = description.match(/SOURCE_ID:([^\]]+)/);
-      if (match) {
-        map.set(match[1], event);
-      }
+    if (sourceId) {
+      map.set(sourceId, event);
     }
   }
   
@@ -198,10 +256,7 @@ function buildSyncedDescription(sourceEvent, sourceId) {
     description = sourceEvent.getDescription() || '';
   }
   
-  // Add sync metadata (hidden at the bottom)
-  const metadata = `\n\n<!-- ${CONFIG.SYNC_TAG} SOURCE_ID:${sourceId} -->`;
-  
-  return description + metadata;
+  return description + SyncMetadata.createTag(sourceId);
 }
 
 /**
@@ -214,8 +269,8 @@ function needsUpdate(existingEvent, newData) {
   if (existingEvent.getLocation() !== newData.location) return true;
   
   // Check description (excluding metadata)
-  const existingDesc = (existingEvent.getDescription() || '').split('<!-- ' + CONFIG.SYNC_TAG)[0].trim();
-  const newDesc = (newData.description || '').split('<!-- ' + CONFIG.SYNC_TAG)[0].trim();
+  const existingDesc = SyncMetadata.stripTag(existingEvent.getDescription());
+  const newDesc = SyncMetadata.stripTag(newData.description);
   if (existingDesc !== newDesc) return true;
   
   return false;
@@ -414,8 +469,7 @@ function clearSyncedEvents() {
   let deleted = 0;
   
   for (const event of events) {
-    const description = event.getDescription() || '';
-    if (description.includes(CONFIG.SYNC_TAG)) {
+    if (SyncMetadata.hasTag(event.getDescription())) {
       event.deleteEvent();
       deleted++;
     }
